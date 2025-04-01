@@ -29,7 +29,7 @@ const ReportsView = () => {
   const [loading, setLoading] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
-  const [selectedCourse, setSelectedCourse] = useState<string>('');
+  const [selectedCourse, setSelectedCourse] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>('');
 
   useEffect(() => {
@@ -58,7 +58,7 @@ const ReportsView = () => {
 
   const getFilteredAttendance = () => {
     return attendanceRecords.filter(record => {
-      const matchesCourse = !selectedCourse || record.course === selectedCourse;
+      const matchesCourse = selectedCourse === 'all' || record.course === selectedCourse;
       const matchesDate = !selectedDate || record.date.includes(selectedDate);
       return matchesCourse && matchesDate;
     });
@@ -155,7 +155,7 @@ const ReportsView = () => {
                   <SelectValue placeholder="All Courses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Courses</SelectItem>
+                  <SelectItem value="all">All Courses</SelectItem>
                   <SelectItem value="CS101">CS101 - Introduction to Computer Science</SelectItem>
                   <SelectItem value="CS201">CS201 - Data Structures</SelectItem>
                   <SelectItem value="CS301">CS301 - Algorithms</SelectItem>
