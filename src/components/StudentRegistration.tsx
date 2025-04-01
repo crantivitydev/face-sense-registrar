@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { Card } from '@/components/ui/card';
 import FaceApiService from '@/services/FaceApiService';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Camera, CameraOff } from 'lucide-react';
 
 const StudentRegistration = () => {
   const [studentId, setStudentId] = useState('');
@@ -58,9 +58,27 @@ const StudentRegistration = () => {
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: "user" 
+        } 
+      });
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(err => {
+            console.error("Error playing video:", err);
+            toast({
+              title: "Camera Error",
+              description: "Failed to start video stream. Please check permissions.",
+              variant: "destructive"
+            });
+          });
+        };
+        
         streamRef.current = stream;
         setIsCapturing(true);
         setCapturedImages([]);
@@ -220,7 +238,10 @@ const StudentRegistration = () => {
                 Loading Models...
               </>
             ) : (
-              "Start Camera"
+              <>
+                <Camera className="mr-2 h-4 w-4" />
+                Start Camera
+              </>
             )}
           </Button>
         ) : (
@@ -244,6 +265,7 @@ const StudentRegistration = () => {
                 className="flex-1"
                 disabled={capturedImages.length >= 5}
               >
+                <Camera className="mr-2 h-4 w-4" />
                 Capture Image ({capturedImages.length}/5)
               </Button>
               <Button 
@@ -251,6 +273,7 @@ const StudentRegistration = () => {
                 variant="destructive"
                 className="flex-1"
               >
+                <CameraOff className="mr-2 h-4 w-4" />
                 Stop Camera
               </Button>
             </div>

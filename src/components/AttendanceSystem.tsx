@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import FaceApiService from '@/services/FaceApiService';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Camera, CameraOff } from 'lucide-react';
 
 const AttendanceSystem = () => {
   const [isStarted, setIsStarted] = useState(false);
@@ -72,9 +72,27 @@ const AttendanceSystem = () => {
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: "user" 
+        } 
+      });
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(err => {
+            console.error("Error playing video:", err);
+            toast({
+              title: "Camera Error",
+              description: "Failed to start video stream. Please check permissions.",
+              variant: "destructive"
+            });
+          });
+        };
+        
         streamRef.current = stream;
         setIsStarted(true);
         setRecognizedStudents([]);
@@ -191,7 +209,10 @@ const AttendanceSystem = () => {
                 Loading Data...
               </>
             ) : (
-              "Start Attendance"
+              <>
+                <Camera className="mr-2 h-4 w-4" />
+                Start Attendance
+              </>
             )}
           </Button>
         ) : (
@@ -213,6 +234,7 @@ const AttendanceSystem = () => {
               variant="destructive"
               className="w-full"
             >
+              <CameraOff className="mr-2 h-4 w-4" />
               Stop & Save Attendance
             </Button>
           </div>
