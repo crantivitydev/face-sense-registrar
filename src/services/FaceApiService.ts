@@ -1,6 +1,4 @@
 
-import * as faceapi from 'face-api.js';
-
 // Types
 interface StudentDescriptor {
   id: string;
@@ -30,9 +28,10 @@ class FaceApiService {
   private modelsLoaded = false;
   private students: StudentDescriptor[] = [];
   private attendanceRecords: AttendanceRecord[] = [];
+  private readonly API_URL = 'http://localhost:5000/api';
   
   private constructor() {
-    // Load stored data from localStorage
+    // Load stored data from localStorage as fallback
     this.loadStoredData();
   }
   
@@ -96,84 +95,94 @@ class FaceApiService {
     if (this.modelsLoaded) return;
     
     try {
-      // Use models from CDN to avoid weight file hosting issues
-      const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+      // Call to Flask backend to initialize models
+      const response = await fetch(`${this.API_URL}/load-models`);
+      const data = await response.json();
       
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-      
-      this.modelsLoaded = true;
-      console.log("Face-api models loaded successfully");
+      if (data.success) {
+        this.modelsLoaded = true;
+        console.log("Face recognition models loaded successfully");
+        return true;
+      } else {
+        throw new Error("Failed to load models");
+      }
     } catch (error) {
-      console.error("Error loading face-api models:", error);
+      console.error("Error loading face recognition models:", error);
+      
+      // Fallback: Set models as loaded to continue with local storage functionality
+      this.modelsLoaded = true;
+      
       throw error;
     }
   }
   
   public async loadRegisteredStudents() {
-    // This is just a stub to load students from storage
-    // In a real app, this would fetch from a database
-    return this.students;
+    try {
+      // Try to fetch students from Flask backend
+      const response = await fetch(`${this.API_URL}/get-students`);
+      const data = await response.json();
+      
+      // Update local students list with basic info
+      this.students = data.map((student: any) => ({
+        id: student.id,
+        name: student.name,
+        descriptors: [] // We don't need descriptors for the UI display
+      }));
+      
+      return this.students;
+    } catch (error) {
+      console.error("Error fetching students from backend:", error);
+      // Return local storage data as fallback
+      return this.students;
+    }
   }
   
-  public async detectFaces(input: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement) {
-    if (!this.modelsLoaded) {
-      throw new Error("Models not loaded");
-    }
-    
-    try {
-      return await faceapi.detectAllFaces(input)
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (error) {
-      console.error("Error detecting faces:", error);
-      throw error;
-    }
+  private async createImageElement(dataUrl: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (err) => reject(err);
+      img.src = dataUrl;
+    });
   }
   
   public async registerStudent(id: string, name: string, images: string[]) {
-    if (!this.modelsLoaded) {
-      throw new Error("Models not loaded");
-    }
-    
     try {
-      // Check if student ID already exists
+      // Send data to Flask backend
+      const response = await fetch(`${this.API_URL}/register-student`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id,
+          name,
+          images
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || "Registration failed");
+      }
+      
+      // If backend registration succeeded, update local storage too
+      // Find if student already exists
       const existingIndex = this.students.findIndex(student => student.id === id);
       
-      // Process all images and extract face descriptors
-      const descriptors: Float32Array[] = [];
-      
-      for (const imageData of images) {
-        const img = await this.createImageElement(imageData);
-        const detections = await this.detectFaces(img);
-        
-        if (detections.length !== 1) {
-          console.warn(`Skipping image with ${detections.length} faces`);
-          continue;
-        }
-        
-        descriptors.push(detections[0].descriptor);
-      }
-      
-      if (descriptors.length === 0) {
-        throw new Error("No valid face descriptors could be extracted");
-      }
-      
-      // Store student data
       if (existingIndex >= 0) {
         // Update existing student
         this.students[existingIndex] = {
-          id,
-          name,
-          descriptors
+          ...this.students[existingIndex],
+          name
         };
       } else {
         // Add new student
         this.students.push({
           id,
           name,
-          descriptors
+          descriptors: []  // We don't store actual descriptors locally anymore
         });
       }
       
@@ -187,99 +196,133 @@ class FaceApiService {
     }
   }
   
-  private async createImageElement(dataUrl: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = (err) => reject(err);
-      img.src = dataUrl;
-    });
-  }
-  
   public async recognizeFaces(input: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement): Promise<RecognizedFace[]> {
-    if (!this.modelsLoaded) {
-      throw new Error("Models not loaded");
-    }
-    
-    if (this.students.length === 0) {
-      return [];
-    }
-    
     try {
-      const detections = await this.detectFaces(input);
-      const recognizedFaces: RecognizedFace[] = [];
+      // Capture current frame from video/canvas/image
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
       
-      for (const detection of detections) {
-        const bestMatch = this.findBestMatch(detection.descriptor);
-        if (bestMatch) {
-          recognizedFaces.push(bestMatch);
-        }
+      if (!context) {
+        throw new Error("Failed to get canvas context");
       }
       
-      return recognizedFaces;
+      // Set canvas dimensions to match input
+      canvas.width = input.width || 640;
+      canvas.height = input.height || 480;
+      
+      // Draw current frame to canvas
+      context.drawImage(input, 0, 0, canvas.width, canvas.height);
+      
+      // Get base64 data URL
+      const imageData = canvas.toDataURL('image/jpeg');
+      
+      // Send to Flask backend
+      const response = await fetch(`${this.API_URL}/recognize-faces`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageData
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || "Face recognition failed");
+      }
+      
+      return data.recognizedFaces || [];
     } catch (error) {
       console.error("Error recognizing faces:", error);
-      throw error;
+      return []; // Return empty array to not break the UI
     }
   }
   
-  private findBestMatch(queryDescriptor: Float32Array): RecognizedFace | null {
-    if (this.students.length === 0) return null;
-    
-    let bestMatchStudent: StudentDescriptor | null = null;
-    let bestMatchDistance = Infinity;
-    
-    // For each student
-    for (const student of this.students) {
-      // For each descriptor of this student
-      for (const descriptor of student.descriptors) {
-        // Calculate distance
-        const distance = faceapi.euclideanDistance(queryDescriptor, descriptor);
-        
-        // Update best match if this is better
-        if (distance < bestMatchDistance) {
-          bestMatchDistance = distance;
-          bestMatchStudent = student;
-        }
+  public async saveAttendance(course: string, students: {id: string, name: string, time: string}[]) {
+    try {
+      // Send to Flask backend
+      const response = await fetch(`${this.API_URL}/save-attendance`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          course,
+          students
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || "Failed to save attendance");
       }
+      
+      // Update local record too
+      const attendanceId = `${course}_${new Date().toISOString().split('T')[0]}_${Date.now()}`;
+      
+      this.attendanceRecords.push({
+        id: attendanceId,
+        course,
+        date: new Date().toLocaleDateString(),
+        students
+      });
+      
+      this.saveAttendanceToStorage();
+      return { success: true };
+    } catch (error) {
+      console.error("Error saving attendance:", error);
+      
+      // Fallback: Save to local storage only
+      const attendanceId = `${course}_${new Date().toISOString().split('T')[0]}_${Date.now()}`;
+      
+      this.attendanceRecords.push({
+        id: attendanceId,
+        course,
+        date: new Date().toLocaleDateString(),
+        students
+      });
+      
+      this.saveAttendanceToStorage();
+      return { success: true };
     }
-    
-    // Check if the match is good enough (threshold)
-    const RECOGNITION_THRESHOLD = 0.6;
-    if (bestMatchDistance <= RECOGNITION_THRESHOLD && bestMatchStudent) {
-      return {
-        studentId: bestMatchStudent.id,
-        studentName: bestMatchStudent.name,
-        similarity: 1 - bestMatchDistance
-      };
+  }
+  
+  public async getRegisteredStudents() {
+    try {
+      // Try to fetch students from Flask backend
+      const response = await fetch(`${this.API_URL}/get-students`);
+      const data = await response.json();
+      
+      return data;
+    } catch (error) {
+      console.error("Error fetching students from backend:", error);
+      // Return local storage data as fallback
+      return this.students.map(student => ({
+        id: student.id,
+        name: student.name
+      }));
     }
-    
-    return null;
   }
   
-  public saveAttendance(course: string, students: {id: string, name: string, time: string}[]) {
-    const attendanceId = `${course}_${new Date().toISOString().split('T')[0]}_${Date.now()}`;
-    
-    this.attendanceRecords.push({
-      id: attendanceId,
-      course,
-      date: new Date().toLocaleDateString(),
-      students
-    });
-    
-    this.saveAttendanceToStorage();
-    return { success: true };
-  }
-  
-  public getRegisteredStudents() {
-    return this.students.map(student => ({
-      id: student.id,
-      name: student.name
-    }));
-  }
-  
-  public getAttendanceRecords() {
-    return this.attendanceRecords;
+  public async getAttendanceRecords() {
+    try {
+      // Try to fetch attendance records from Flask backend
+      const response = await fetch(`${this.API_URL}/get-attendance-records`);
+      const data = await response.json();
+      
+      // Update local records
+      this.attendanceRecords = data;
+      this.saveAttendanceToStorage();
+      
+      return data;
+    } catch (error) {
+      console.error("Error fetching attendance records from backend:", error);
+      // Return local storage data as fallback
+      return this.attendanceRecords;
+    }
   }
 }
 
