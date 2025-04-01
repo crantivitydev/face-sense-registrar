@@ -1,4 +1,3 @@
-
 // Types
 interface StudentDescriptor {
   id: string;
@@ -237,6 +236,52 @@ class FaceApiService {
     } catch (error) {
       console.error("Error recognizing faces:", error);
       return []; // Return empty array to not break the UI
+    }
+  }
+  
+  public async detectFaces(input: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement): Promise<any[]> {
+    try {
+      // Capture current frame from video/canvas/image
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      
+      if (!context) {
+        throw new Error("Failed to get canvas context");
+      }
+      
+      // Set canvas dimensions to match input
+      canvas.width = input.width || 640;
+      canvas.height = input.height || 480;
+      
+      // Draw current frame to canvas
+      context.drawImage(input, 0, 0, canvas.width, canvas.height);
+      
+      // Get base64 data URL
+      const imageData = canvas.toDataURL('image/jpeg');
+      
+      // Send to Flask backend for face detection
+      const response = await fetch(`${this.API_URL}/recognize-faces`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageData
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || "Face detection failed");
+      }
+      
+      // Return the detected faces array
+      // This should match what StudentRegistration component expects
+      return data.recognizedFaces || [];
+    } catch (error) {
+      console.error("Error detecting faces:", error);
+      return []; // Return empty array if there's an error
     }
   }
   
